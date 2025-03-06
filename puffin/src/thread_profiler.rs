@@ -22,13 +22,13 @@ pub fn internal_profile_reporter(
 
 /// Collects profiling data for one thread
 pub struct ThreadProfiler {
-    stream_info: StreamInfo,
+    pub stream_info: StreamInfo,
     scope_details: Vec<ScopeDetails>,
     /// Current depth.
-    depth: usize,
-    now_ns: NsSource,
+    pub depth: usize,
+    pub now_ns: NsSource,
     reporter: ThreadReporter,
-    start_time_ns: Option<NanoSecond>,
+    pub start_time_ns: Option<NanoSecond>,
 }
 
 impl Default for ThreadProfiler {
@@ -114,10 +114,56 @@ impl ThreadProfiler {
         offset
     }
 
+    pub fn begin_scope_with_offset(&mut self, scope_id: ScopeId, data: &str, offset: i64) -> usize {
+        self.depth += 1;
+
+        let (offset, start_ns) = self
+            .stream_info
+            .stream
+            .begin_scope(|| {(self.now_ns)() + offset}, scope_id, data);
+
+        self.stream_info.range_ns.0 = self.stream_info.range_ns.0.min(start_ns);
+        self.start_time_ns = Some(self.start_time_ns.unwrap_or(start_ns));
+
+        offset
+    }
+
     /// Marks the end of the scope.
     /// Returns the current depth.
     pub fn end_scope(&mut self, start_offset: usize) {
         let now_ns = (self.now_ns)();
+        self.stream_info.depth = self.stream_info.depth.max(self.depth);
+        self.stream_info.num_scopes += 1;
+        self.stream_info.range_ns.1 = self.stream_info.range_ns.1.max(now_ns);
+
+        if self.depth > 0 {
+            self.depth -= 1;
+        } else {
+            eprintln!("puffin ERROR: Mismatched scope begin/end calls");
+        }
+
+        self.stream_info.stream.end_scope(start_offset, now_ns);
+
+        if self.depth == 0 {
+            // We have no open scopes.
+            // This is a good time to report our profiling stream to the global profiler:
+            let info = ThreadInfo {
+                start_time_ns: self.start_time_ns,
+                name: std::thread::current().name().unwrap_or_default().to_owned(),
+            };
+            (self.reporter)(
+                info,
+                &self.scope_details,
+                &self.stream_info.as_stream_into_ref(),
+            );
+
+            self.scope_details.clear();
+            self.stream_info.clear();
+        }
+    }
+
+    pub fn end_scope_with_offset(&mut self, start_offset: usize, offset: i64) {
+        let now_ns = (self.now_ns)() + offset;
         self.stream_info.depth = self.stream_info.depth.max(self.depth);
         self.stream_info.num_scopes += 1;
         self.stream_info.range_ns.1 = self.stream_info.range_ns.1.max(now_ns);
