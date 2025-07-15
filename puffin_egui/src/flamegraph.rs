@@ -886,7 +886,7 @@ fn paint_scope_details(ui: &mut Ui, scope_id: ScopeId, data: &str, scope_details
 
             if !data.is_empty() {
                 ui.monospace("data");
-                ui.monospace(data.as_str());
+                ui.monospace(data);
                 ui.end_row();
             }
 
